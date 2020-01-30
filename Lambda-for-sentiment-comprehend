@@ -1,0 +1,53 @@
+#After transcribe desposits the transcription file to the destination bucket, another event is triggered by the desintation bucket.
+#This event triggers the lambda for comprehend function to run sentiment analysis on the transcription json file.
+#Python3.8
+#Handler = lambda_function.lambda_handler
+
+import boto3
+import json
+import os
+from decimal import Decimal
+ 
+def lambda_handler(event, context):
+
+    s3 = boto3.client('s3')
+    
+    record = event['Records'][0]
+    bucket = record['s3']['bucket']['name']
+    key = record['s3']['object']['key']
+    
+    file_content = s3.get_object(Bucket=bucket, Key=key)['Body'].read().decode('utf-8')
+    data = json.loads(file_content)
+    
+    text = data['results']['transcripts'][0]['transcript'].upper()
+
+
+    if len(text) == 0:
+        text = 'EMPTY'
+        languagecode = 'EMPTY'
+        sentiment = 'EMPTY'
+        score = Decimal(0)
+    else:
+        comprehend = boto3.client(service_name='comprehend', region_name='us-east-1')
+        
+        language = comprehend.detect_dominant_language(Text = text)
+        languagecode = language['Languages'][0]['LanguageCode']
+        
+        if languagecode in ['en', 'es']:
+            comp_sentiment = comprehend.detect_sentiment(Text=text, LanguageCode=languagecode)
+            sentiment = comp_sentiment['Sentiment']
+            score =  str(comp_sentiment['SentimentScore'][comp_sentiment['Sentiment'].title()])
+        else:
+            sentiment = 'UNSUPPORTED LANGUAGE'
+            score = 0
+    
+    content = {            
+            'transcript' : text,
+            'language' : languagecode,
+            'sentiment' : sentiment,
+            'sentiment_score' : float(score)
+        
+    }
+    s3.put_object(Body=json.dumps(content), Bucket='sentimentpocanalyzed', Key="transcript-sentiment/"+key);
+    
+    return
